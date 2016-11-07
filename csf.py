@@ -33,6 +33,7 @@ from collections import defaultdict
 from docopt import docopt
 from seqlib.path import create_dir, check_dir, which
 from seqlib.ngs import check_fasta
+from seqlib.helper import run_command
 
 __author__ = 'Xiao-Ou Zhang <xiaoou.zhang@umassmed.edu>'
 __version__ = '0.0.1'
@@ -98,10 +99,8 @@ def build_index(fa, chrom, site, strand, rlen, thread, out_dir):
     # build index
     if which('bowtie2-build'):
         command = 'bowtie2-build -q --threads %s %s %s'
-        return_code = os.system(command % (thread, index_path,
-                                           index_path)) >> 8
-        if return_code:
-            sys.exit('Error: cannot build index for sgRNA!')
+        command = command % (thread, index_path, index_path)
+        run_command(command, 'Error: cannot build index for sgRNA!')
     else:
         sys.exit('Error: no bowtie2-build installed!')
     return index_path, offset
@@ -159,9 +158,8 @@ def bowtie2_align(index, read, thread, out_dir):
         bam = os.path.join(out_dir, 'cs.bam')
         sam = tempfile.NamedTemporaryFile('w+')
         command = 'bowtie2 --quiet --end-to-end -p %s -x %s -U %s -S %s'
-        return_code = os.system(command % (thread, index, read, sam.name)) >> 8
-        if return_code:
-            sys.exit('Error in bowtie2 alignment!')
+        command = command % (thread, index, read, sam.name)
+        run_command(command, 'Error in bowtie2 alignment!')
         sam.seek(0)
         with pysam.AlignmentFile(sam.name, 'r') as sam_f:
             with pysam.AlignmentFile(bam, 'wb', template=sam_f) as bam_f:
