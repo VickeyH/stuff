@@ -2,19 +2,20 @@
 # -*- coding: utf-8 -*-
 
 '''
-Usage: csf.py [options] -g GENOME -c CHROM -s SITE -r STRAND (-1 FA1 -2 FA2 | \
--R FA) <out_dir>
+Usage: csf.py [options] -g GENOME -c CHROM -s SITE -r STRAND (-1 FQ1 -2 FQ2 | \
+-R FQ) <out_dir>
 
 Options:
     -h --help                      Show help message.
     --version                      Show version.
     -g GENOME --genome=GENOME      Genome FASTA file.
     -c CHROM --chrom=CHROM         Chromosome of sgRNA.
-    -s SITE --site=SITE            Site of sgRNA.
+    -s SITE --site=SITE            Site of sgRNA (boundary between PAM and \
+target).
     -r STRAND --strand=STRAND      Strand of sgRNA (1: +, 0: -).
-    -1 FA1                         Comma-separated list of mate 1 files.
-    -2 FA2                         Comma-separated list of mate 2 files.
-    -R FA                          Comma-separated list of fastq files.
+    -1 FQ1                         Comma-separated list of mate 1 files.
+    -2 FQ2                         Comma-separated list of mate 2 files.
+    -R FQ                          Comma-separated list of fastq files.
     -p THREAD --thread=THREAD      Running threads. [default: 10]
     --stranded                     Stranded sequencing tag. # TODO
     --read-length=RLEN             Length of reads. [default: 100]
