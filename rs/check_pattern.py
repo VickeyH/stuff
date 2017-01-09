@@ -90,11 +90,11 @@ def check_pattern(options):
         p.join()
     with open(options['<rs_pattern>'], 'w') as out:
         for r in result:
-            pvalue, rs_info = r.get()
+            pvalue, fold, rs_info = r.get()
             if pvalue is not None:
                 for junc in junc_info[rs_info]:
                     out.write('\t'. join(junc))
-                    out.write('\t%f\n' % pvalue)
+                    out.write('\t%f\t%f\n' % (fold, pvalue))
 
 
 def bg_to_bw(bg, chrom_size):
@@ -134,21 +134,21 @@ def cal_ratio(bw, rs_info, options):
     if strand == '+':
         peak_region = region2[0]  # potential as exon peak region
         if peak_region > np.mean(region2) + 3 * np.std(region2):  # as exon
-            return None, rs_info
+            return None, None, rs_info
         if d <= 1 / fold_change:  # enough fold
             return permutation(region1, region2, d, 'less', iteration_time,
-                               cutoff), rs_info
+                               cutoff), d, rs_info
         else:  # not enough fold
-            return None, rs_info
+            return None, None, rs_info
     else:
         peak_region = region1[-1]  # potential as exon peak region
         if peak_region > np.mean(region1) + 3 * np.std(region1):  # as exon
-            return None, rs_info
+            return None, None, rs_info
         if d >= fold_change:  # enough fold
             return permutation(region1, region2, d, 'more', iteration_time,
-                               cutoff), rs_info
+                               cutoff), d, rs_info
         else:  # not enough fold
-            return None, rs_info
+            return None, None, rs_info
 
 
 def fetch_signal(bwf, chrom, site, bin_size, i):
