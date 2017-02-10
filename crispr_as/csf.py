@@ -13,6 +13,7 @@ Options:
     -s SITE --site=SITE            Site of sgRNA (boundary between PAM and \
 target).
     -r STRAND --strand=STRAND      Strand of sgRNA (1: +, 0: -).
+    --seq=SEQ                      Sequence around sgRNA.
     -1 FQ1                         Comma-separated list of mate 1 files.
     -2 FQ2                         Comma-separated list of mate 2 files.
     -R FQ                          Comma-separated list of fastq files.
@@ -33,16 +34,25 @@ import pysam
 from collections import defaultdict
 from docopt import docopt
 from seqlib.path import create_dir, check_dir, which
+from seqlib.seq import dna_to_rna
 from seqlib.ngs import check_fasta
 from seqlib.helper import run_command
 
 __author__ = 'Xiao-Ou Zhang <xiaoou.zhang@umassmed.edu>'
-__version__ = '0.0.1'
+__version__ = '0.0.2'
 
 
 def main():
     # parse options
     options = docopt(__doc__, version=__version__)
+    if options['--seq']:
+        if not os.path.isfile(options['--seq']):
+            sys.exit('Error: wrong seq file!')
+        seq = os.path.abspath(options['--seq'])
+        seq_flag = True
+    else:
+        seq = None
+        seq_flag = False
     fa = check_fasta(options['--genome'])
     chrom = options['--chrom']
     site = int(options['--site'])
@@ -59,7 +69,7 @@ def main():
         out_dir = check_dir(options['<out_dir>'])
     # build index for sgRNA
     index_path, offset = build_index(fa, chrom, site, strand, rlen, thread,
-                                     out_dir)
+                                     out_dir, seq, seq_flag)
     if not skip_flag:  # not skip alignment
         # deal with reads file
         reads = tempfile.NamedTemporaryFile(mode='w+')
@@ -79,10 +89,10 @@ def main():
     else:
         bam = os.path.join(out_dir, 'cs.bam')
     # fetch cleavage site reads
-    fetch_reads(index_path, offset, strand, alen, clen, bam, out_dir)
+    fetch_reads(index_path, offset, alen, clen, bam, out_dir)
 
 
-def build_index(fa, chrom, site, strand, rlen, thread, out_dir):
+def build_index(fa, chrom, site, strand, rlen, thread, out_dir, seq, seq_flag):
     print('Build index...')
     if strand == '+':
         start = site - (rlen - 10)
@@ -93,10 +103,14 @@ def build_index(fa, chrom, site, strand, rlen, thread, out_dir):
         end = site + (rlen - 10)
         offset = rlen - 20
     index_path = os.path.join(out_dir, 'sgRNA.fa')
-    # fetch sgRNA region sequence
-    with open(index_path, 'w') as out:
-        out.write('>sgRNA_region\n')
-        out.write(fa.fetch(chrom, start, end) + '\n')
+    if seq_flag:
+        os.symlink(seq, index_path)
+    else:
+        # fetch sgRNA region sequence
+        with open(index_path, 'w') as out:
+            out.write('>sgRNA_region\n')
+            out.write(dna_to_rna(fa.fetch(chrom, start, end), strand=strand) +
+                      '\n')
     # build index
     if which('bowtie2-build'):
         command = 'bowtie2-build -q --threads %s %s %s'
@@ -173,14 +187,11 @@ def bowtie2_align(index, read, thread, out_dir):
         sys.exit('Error: no bowtie2 installed!')
 
 
-def fetch_reads(index, offset, strand, alen, clen, bam, out_dir):
+def fetch_reads(index, offset, alen, clen, bam, out_dir):
     cs = os.path.join(out_dir, 'cs_region.txt')
     count = os.path.join(out_dir, 'cs_count.txt')
     with open(cs, 'w') as cs_out, open(count, 'w') as count_out:
-        if strand == '+':
-            cs_out.write(' ' * 35 + 'sgRNA|PAM\n')
-        else:
-            cs_out.write(' ' * 37 + 'PAM|sgRNA\n')
+        cs_out.write(' ' * alen + 'sgRNA|PAM|\n')
         index_fa = check_fasta(index).fetch('sgRNA_region')
         cs_out.write('Reference: ' + index_fa[offset - alen:offset + alen] +
                      '\n')
