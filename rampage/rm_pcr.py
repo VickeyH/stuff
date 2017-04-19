@@ -61,20 +61,34 @@ def write_signal(pairs, prefix, init):
     bed5m = check_file(prefix + '_minus_5end.bed', init)
     bed3p = check_file(prefix + '_plus_3read.bed', init)
     bed3m = check_file(prefix + '_minus_3read.bed', init)
+    bedp = check_file(prefix + '_plus.bed', init)
+    bedm = check_file(prefix + '_minus.bed', init)
     for pair in pairs:
         pair_info = pair.split()
         r1_chrom, r1_start, r1_end, r1_strand = pair_info[:4]
         r2_chrom, r2_start, r2_end, r2_strand = pair_info[5:9]
         if r1_strand == '+':
-            bed5p.write('\t'.join([r1_chrom, r1_start, str(int(r1_start) + 1),
-                                   '5end\t0', r1_strand]) + '\n')
-            bed3p.write('\t'.join([r2_chrom, str(int(r2_end) - 1), r2_end,
-                                   '3read\t0', r2_strand]) + '\n')
+            start = int(r1_start)
+            end = int(r2_end)
+            bed5p.write('%s\t%d\t%d\t5end\t0\t%s\n' % (r1_chrom, start,
+                                                       start + 1, r1_strand))
+            bed3p.write('%s\t%d\t%d\t3read\t0\t%s\n' % (r2_chrom, end - 1,
+                                                        end, r2_strand))
+            offset = '0,' + str(end - start - 1)
+            bedp.write('\t'.join([r1_chrom, r1_start, r2_end, 'link\t0',
+                                  r1_strand, r1_start, r1_start, '0,0,0',
+                                  '2', '1,1', offset]) + '\n')
         else:
-            bed5m.write('\t'.join([r1_chrom, str(int(r1_end) - 1), r1_end,
-                                   '5end\t0', r1_strand]) + '\n')
-            bed3m.write('\t'.join([r2_chrom, r2_start, str(int(r2_start) + 1),
-                                   '3read\t0', r2_strand]) + '\n')
+            start = int(r2_start)
+            end = int(r1_end)
+            bed5m.write('%s\t%d\t%d\t5end\t0\t%s\n' % (r1_chrom, end - 1,
+                                                       end, r1_strand))
+            bed3m.write('%s\t%d\t%d\t3read\t0\t%s\n' % (r2_chrom, start,
+                                                        start - 1, r2_strand))
+            offset = '0,' + str(end - start - 1)
+            bedm.write('\t'.join([r1_chrom, r2_start, r1_end, 'link\t0',
+                                  r1_strand, r2_start, r2_start, '0,0,0',
+                                  '2', '1,1', offset]) + '\n')
 
 
 def remove_pcr(bam_f, chrom=None):
