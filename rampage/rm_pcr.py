@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 '''
-Usage: call_peak.py [options] <rampage>
+Usage: rm_pcr.py [options] <rampage>
 
 Options:
     -h --help                      Show help message.
@@ -19,19 +19,14 @@ __author__ = 'Xiao-Ou Zhang <xiaoou.zhang@umassmed.edu>'
 __version__ = '0.0.1'
 
 
-def call_peak(options):
+def rm_pcr(options):
     '''
-    Call peaks for rampage data
-    1. remove PCR duplicates
-    2. calculate background expression levels (TODO)
-    3. filter out peaks lower than background (TODO)
+    Remove PCR duplicates
     '''
     # parse options
     rampage = options['<rampage>']
     thread = int(options['--thread'])
     prefix = options['--output']
-    # check output files
-    check_file(prefix)
     # remove PCR duplicates
     if thread > 1:  # more than 1 thread, parse bam file based on chromosome
         from multiprocessing import Pool
@@ -43,27 +38,29 @@ def call_peak(options):
                                                               chrom,)))
         p.close()
         p.join()
-        for r in result:
+        for n, r in enumerate(result):
+            if n == 0:
+                init = True
+            else:
+                init = False
             collapsed_pairs = r.get()
-            write_signal(collapsed_pairs, prefix)
+            write_signal(collapsed_pairs, prefix, init)
     else:
         collapsed_pairs = remove_pcr(rampage)
-        write_signal(collapsed_pairs, prefix)
+        write_signal(collapsed_pairs, prefix, True)
 
 
-def check_file(prefix):
-    file_lst = [prefix + '_plus_5end.bed', prefix + '_minus_5end.bed',
-                prefix + '_plus_3read.bed', prefix + '_minus_3read.bed']
-    for f in file_lst:
-        if os.path.isfile(f):
-            os.remove(f)
+def check_file(fname, init):
+    if os.path.isfile(fname) and init:
+        os.remove(fname)
+    return open(fname, 'a')
 
 
-def write_signal(pairs, prefix):
-    bed5p = open(prefix + '_plus_5end.bed', 'a')
-    bed5m = open(prefix + '_minus_5end.bed', 'a')
-    bed3p = open(prefix + '_plus_3read.bed', 'a')
-    bed3m = open(prefix + '_minus_3read.bed', 'a')
+def write_signal(pairs, prefix, init):
+    bed5p = check_file(prefix + '_plus_5end.bed', init)
+    bed5m = check_file(prefix + '_minus_5end.bed', init)
+    bed3p = check_file(prefix + '_plus_3read.bed', init)
+    bed3m = check_file(prefix + '_minus_3read.bed', init)
     for pair in pairs:
         pair_info = pair.split()
         r1_chrom, r1_start, r1_end, r1_strand = pair_info[:4]
@@ -71,13 +68,13 @@ def write_signal(pairs, prefix):
         if r1_strand == '+':
             bed5p.write('\t'.join([r1_chrom, r1_start, str(int(r1_start) + 1),
                                    '5end\t0', r1_strand]) + '\n')
-            bed3p.write('\t'.join([r2_chrom, r2_start, r2_end, '3read\t0',
-                                   r2_strand]) + '\n')
+            bed3p.write('\t'.join([r2_chrom, str(int(r2_end) - 1), r2_end,
+                                   '3read\t0', r2_strand]) + '\n')
         else:
             bed5m.write('\t'.join([r1_chrom, str(int(r1_end) - 1), r1_end,
                                    '5end\t0', r1_strand]) + '\n')
-            bed3m.write('\t'.join([r2_chrom, r2_start, r2_end, '3read\t0',
-                                   r2_strand]) + '\n')
+            bed3m.write('\t'.join([r2_chrom, r2_start, str(int(r2_start) + 1),
+                                   '3read\t0', r2_strand]) + '\n')
 
 
 def remove_pcr(bam_f, chrom=None):
@@ -142,4 +139,4 @@ def fetch_read2(bam, read1, chrom):
 
 if __name__ == '__main__':
     from docopt import docopt
-    call_peak(docopt(__doc__, version=__version__))
+    rm_pcr(docopt(__doc__, version=__version__))
