@@ -60,8 +60,8 @@ def call_peak(options):
         if var == 0:
             continue
         filtered_peaks = filter_peak(peaks, e_mean, var, cutoff)
-        gene_info = '%s\t%d\t%d\t%f' % (gene.seqid, gene.start, gene.end,
-                                        e_mean)
+        gene_info = '%s\t%s\t%d\t%d\t%f' % (gene.id, gene.seqid, gene.start,
+                                            gene.end, e_mean)
         for p in filtered_peaks:  # TODO: support multiprocessing
             outf.write(p + '\t' + gene_info + '\n')
 
@@ -70,18 +70,22 @@ def assign_peak(rampage, gene):
     peak_loc = []
     for l in rampage.fetch(gene.seqid, gene.start, gene.end):
         start, end, _, _, strand = l.split()[1:6]
-        start = int(start)
-        end = int(end)
-        if start < gene.start or gene.end < end:
-            continue
         if gene.strand == '+':
             if strand == '-':
                 continue
-            end5 = start
+            end5 = int(start)
+            read3 = int(end)
         else:
             if strand == '+':
                 continue
-            end5 = end
+            end5 = int(end)
+            read3 = int(start)
+        # ensure read3 within gene
+        if read3 < gene.start or read3 > gene.end:
+            continue
+        # ensure end5 not far away from gene
+        if end5 < gene.start - 5000 or end5 > gene.end + 5000:
+            continue
         peak_loc.append([end5 - 10, end5 + 10])
     return peak_loc
 
