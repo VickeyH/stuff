@@ -99,7 +99,7 @@ def remove_pcr(bam_f, chrom=None):
 
 def fetch_read1(bam, chrom):
     read1_lst = {}
-    for read in bam.fetch(chrom, multiple_iterators=True):
+    for read in bam.fetch(chrom):
         if read.is_read2 or read.is_secondary or read.mate_is_unmapped:
             continue
         chrom = read.reference_name
@@ -130,7 +130,7 @@ def fetch_read1(bam, chrom):
 
 def fetch_read2(bam, read1, chrom):
     collapsed_pairs = set()
-    for read in bam.fetch(chrom, multiple_iterators=True):
+    for read in bam.fetch(chrom):
         if read.is_read1 or read.is_secondary or read.mate_is_unmapped:
             continue
         name = read.query_name

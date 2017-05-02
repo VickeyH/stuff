@@ -9,14 +9,16 @@ Options:
     -g GTF --gtf=GTF               Assembled gene annotation GTF file.
     --db DB                        Assembled gene annotation database.
     -p THREAD --thread=THREAD      Threads. [default: 5]
-    --cutoff=CUFOFF                P-value cutoff. [default: 0.05]
+    --promoter=PROMOTER            Promoter region. [default: 2000]
 '''
 
 import math
 import os.path
+from multiprocessing import Pool
 import numpy as np
 import scipy.stats
 import gffutils
+import pysam
 from seqlib.path import check_dir
 from seqlib.ngs import check_bed
 from interval import Interval
@@ -28,7 +30,6 @@ __version__ = '0.0.1'
 def call_peak(options):
     '''
     Call rampage peaks
-    TODO: 1. cutoff; 2. multiprocessing; 3. FDR
     '''
     # parse options
     if options['--gtf']:
@@ -39,38 +40,71 @@ def call_peak(options):
     else:
         db = gffutils.FeatureDB(options['--db'])
     folder = check_dir(options['<rampagepeak>'])
-    rampage = check_bed(os.path.join(folder, 'rampage_link.bed'))
-    peak5 = {'+': check_bed(os.path.join(folder,
-                                         'rampage_plus_5end_fseq.bed')),
+    rampage = check_bed(os.path.join(folder, 'rampage_link.bed'),
+                        return_handle=False)
+    peak5 = {'+': check_bed(os.path.join(folder, 'rampage_plus_5end_fseq.bed'),
+                            return_handle=False),
              '-': check_bed(os.path.join(folder,
-                                         'rampage_minus_5end_fseq.bed'))}
+                                         'rampage_minus_5end_fseq.bed'),
+                            return_handle=False)}
     peak3 = {'+': check_bed(os.path.join(folder,
-                                         'rampage_plus_3read_fseq.bed')),
+                                         'rampage_plus_3read_fseq.bed'),
+                            return_handle=False),
              '-': check_bed(os.path.join(folder,
-                                         'rampage_minus_3read_fseq.bed'))}
-    cutoff = float(options['--cutoff'])
+                                         'rampage_minus_3read_fseq.bed'),
+                            return_handle=False)}
+    pregion = int(options['--promoter'])
     # align and filter candidate peak
-    outf = open(os.path.join(folder, 'rampage_peak.txt'), 'w')
+    p = Pool(int(options['--thread']))
+    results = []
     for gene in db.features_of_type('gene'):
-        peak_loc = assign_peak(rampage, gene)
-        peaks = fetch_peak(peak5[gene.strand], peak_loc, gene)
-        e_mean, var = cal_expression(peak3[gene.strand], gene)
-        if e_mean == 0:
-            continue
-        if var == 0:
-            continue
-        filtered_peaks = filter_peak(peaks, e_mean, var, cutoff)
-        gene_info = '%s\t%s\t%d\t%d\t%f' % (gene.id, gene.seqid, gene.start,
-                                            gene.end, e_mean)
-        for p in filtered_peaks:  # TODO: support multiprocessing
-            outf.write(p + '\t' + gene_info + '\n')
+        gene_info = '%s\t%s\t%d\t%d\t%s' % (gene.id, gene.seqid, gene.start,
+                                            gene.end, gene.strand)
+        p5, p3 = peak5[gene.strand], peak3[gene.strand]
+        results.append(p.apply_async(call_peak_for_gene,
+                                     args=(rampage, p5, p3, gene_info,
+                                           pregion,)))
+    p.close()
+    p.join()
+    peaks, pvalue = [], []
+    for r in results:
+        gene_info, peak = r.get()
+        if gene_info:
+            for p in peak:
+                peaks.append(gene_info + '\t' + p[0])
+                pvalue.append(p[1])
+    # calculate q-value
+    rank = {p: r for r, p in enumerate(np.array(pvalue).argsort())}
+    total_num = len(pvalue)
+    qvalue = [p * total_num / (rank[n] + 1) for n, p in enumerate(pvalue)]
+    # output results
+    with open(os.path.join(folder, 'rampage_peak.txt'), 'w') as outf:
+        for p, q in zip(peaks, qvalue):
+            outf.write('%s\t%f\n' % (p, q))
 
 
-def assign_peak(rampage, gene):
+def call_peak_for_gene(rampage, peak5, peak3, gene_info, pregion):
+    gene_id, gene_chrom, gene_start, gene_end, gene_strand = gene_info.split()
+    gene_start = int(gene_start)
+    gene_end = int(gene_end)
+    peak_loc = assign_peak(rampage, gene_chrom, gene_start, gene_end,
+                           gene_strand, pregion)
+    peaks = fetch_peak(peak5, peak_loc, gene_chrom)
+    e_mean, var = cal_expression(peak3, gene_chrom, gene_start, gene_end)
+    if e_mean == 0:
+        return None, None
+    if var == 0:
+        return None, None
+    filtered_peaks = filter_peak(peaks, e_mean, var)
+    return gene_info, filtered_peaks
+
+
+def assign_peak(rampage, g_chrom, g_start, g_end, g_strand, pregion):
     peak_loc = []
-    for l in rampage.fetch(gene.seqid, gene.start, gene.end):
+    rampagef = pysam.TabixFile(rampage)
+    for l in rampagef.fetch(g_chrom, g_start, g_end):
         start, end, _, _, strand = l.split()[1:6]
-        if gene.strand == '+':
+        if g_strand == '+':
             if strand == '-':
                 continue
             end5 = int(start)
@@ -81,27 +115,29 @@ def assign_peak(rampage, gene):
             end5 = int(end)
             read3 = int(start)
         # ensure read3 within gene
-        if read3 < gene.start or read3 > gene.end:
+        if read3 < g_start or read3 > g_end:
             continue
         # ensure end5 not far away from gene
-        if end5 < gene.start - 5000 or end5 > gene.end + 5000:
+        if end5 < g_start - pregion or end5 > g_end + pregion:
             continue
         peak_loc.append([end5 - 10, end5 + 10])
     return peak_loc
 
 
-def fetch_peak(peak5, peak_loc, gene):
+def fetch_peak(peak5, peak_loc, chrom):
     peaks = set()
+    peak5f = pysam.TabixFile(peak5)
     for loc in Interval(peak_loc):
         start, end = loc[:2]
-        for p in peak5.fetch(gene.seqid, start, end):
+        for p in peak5f.fetch(chrom, start, end):
             peaks.add(p)
     return peaks
 
 
-def cal_expression(peak3, gene):
+def cal_expression(peak3, g_chrom, g_start, g_end):
     expression = []
-    for e in peak3.fetch(gene.seqid, gene.start, gene.end):
+    peak3f = pysam.TabixFile(peak3)
+    for e in peak3f.fetch(g_chrom, g_start, g_end):
         expression.append(float(e.split()[4]))
     expression = np.array(expression)
     if expression.size == 0:
@@ -111,14 +147,16 @@ def cal_expression(peak3, gene):
     return e_mean, var
 
 
-def filter_peak(peaks, e_mean, var, cutoff):
+def filter_peak(peaks, e_mean, var):
     filtered_peaks = []
     for p in peaks:
         chrom, start, end, _, value = p.split()
         value = float(value)
         z_score, p_value = wald_test(value, e_mean, var)
-        filtered_peaks.append('\t'.join([chrom, start, end, str(value),
-                                         str(z_score), str(p_value)]))
+        filtered_peaks.append(['\t'.join([chrom, start, end, str(value),
+                                          str(e_mean), str(z_score),
+                                          str(p_value)]),
+                               p_value])
     return filtered_peaks
 
 
