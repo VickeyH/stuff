@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 
 '''
-Usage: call_peak.py [options] (-g GTF | --db DB) <rampagepeak>
+Usage: call_peak.py [options] (-r REF | -g GTF | --db=DB) <rampagepeak>
 
 Options:
     -h --help                      Show help message.
     --version                      Show version.
+    -r REF --ref=REF               Assembled gene annotation GenePred file.
     -g GTF --gtf=GTF               Assembled gene annotation GTF file.
-    --db DB                        Assembled gene annotation database.
+    --db=DB                        Assembled gene annotation database.
     -p THREAD --thread=THREAD      Threads. [default: 5]
     --promoter=PROMOTER            Promoter region. [default: 1000]
 '''
@@ -32,13 +33,18 @@ def call_peak(options):
     Call rampage peaks
     '''
     # parse options
-    if options['--gtf']:
+    if options['--ref']:
+        db = options['--ref']
+        ref_flag = True
+    elif options['--db']:
+        db = gffutils.FeatureDB(options['--db'])
+        ref_flag = False
+    else:
         gtf_f = options['--gtf']
         prefix = os.path.splitext(os.path.basename(gtf_f))[0]
         db = gffutils.create_db(gtf_f, prefix + '.db',
                                 force=True, disable_infer_transcripts=True)
-    else:
-        db = gffutils.FeatureDB(options['--db'])
+        ref_flag = False
     folder = check_dir(options['<rampagepeak>'])
     rampage = check_bed(os.path.join(folder, 'rampage_link.bed'),
                         return_handle=False)
@@ -57,17 +63,8 @@ def call_peak(options):
     # align and filter candidate peak
     p = Pool(int(options['--thread']))
     results = []
-    for gene in db.features_of_type('gene'):
-        gene_info = '%s\t%s\t%d\t%d\t%s' % (gene.id, gene.seqid, gene.start,
-                                            gene.end, gene.strand)
-        gpromoter = []
-        for t in db.children(gene.id, featuretype='transcript'):
-            if gene.strand == '+':
-                gpromoter.append([t.start - pregion, t.start + pregion])
-            else:
-                gpromoter.append([t.end - pregion, t.end + pregion])
-        gpromoter = Interval(gpromoter)
-        p5, p3 = peak5[gene.strand], peak3[gene.strand]
+    for gene_info, gpromoter, gstrand in parse_gene(db, ref_flag, pregion):
+        p5, p3 = peak5[gstrand], peak3[gstrand]
         results.append(p.apply_async(call_peak_for_gene,
                                      args=(rampage, p5, p3, gene_info,
                                            gpromoter, pregion,)))
@@ -88,6 +85,60 @@ def call_peak(options):
     with open(os.path.join(folder, 'rampage_peak.txt'), 'w') as outf:
         for p, q in zip(peaks, qvalue):
             outf.write('%s\t%f\n' % (p, q))
+
+
+def parse_gene(db, ref_flag, pregion):
+    if ref_flag:  # for GenePred
+        gname = ''
+        gstart, gend, gchr, gstrand = 0, 0, '', ''
+        gpromoter = []
+        with open(db, 'r') as f:
+            for line in f:
+                iso, chrom, strand, start, end = line.split()[:5]
+                if not chrom.startswith('chr'):
+                    continue
+                gene_id = iso.rsplit('.', 1)[0]
+                start = int(start) + 1
+                end = int(end)
+                if gname == gene_id or gname == '':  # not change gene
+                    if gname == '':  # first entry
+                        gname = gene_id
+                        gstart, gend, gchr, gstrand = start, end, chrom, strand
+                    else:  # not first entry
+                        gstart = start if start < gstart else gstart
+                        gend = end if end > gend else gend
+                else:  # change gene
+                    gene_info = '%s\t%s\t%d\t%d\t%s' % (gname, gchr, gstart,
+                                                        gend, gstrand)
+                    gpromoter = Interval(gpromoter)
+                    yield gene_info, gpromoter, gstrand
+                    gname = gene_id
+                    gstart, gend, gchr, gstrand = start, end, chrom, strand
+                    gpromoter = []
+                if strand == '+':
+                    gpromoter.append([start - pregion, start + pregion])
+                else:
+                    gpromoter.append([end - pregion, end + pregion])
+            else:  # last entry
+                gene_info = '%s\t%s\t%d\t%d\t%s' % (gname, gchr, gstart,
+                                                    gend, gstrand)
+                gpromoter = Interval(gpromoter)
+                yield gene_info, gpromoter, gstrand
+    else:  # for GTF
+        for gene in db.features_of_type('gene'):
+            if not gene.seqid.startswith('chr'):
+                continue
+            gene_info = '%s\t%s\t%d\t%d\t%s' % (gene.id, gene.seqid,
+                                                gene.start, gene.end,
+                                                gene.strand)
+            gpromoter = []
+            for t in db.children(gene.id, featuretype='transcript'):
+                if gene.strand == '+':
+                    gpromoter.append([t.start - pregion, t.start + pregion])
+                else:
+                    gpromoter.append([t.end - pregion, t.end + pregion])
+            gpromoter = Interval(gpromoter)
+            yield gene_info, gpromoter, gstrand
 
 
 def call_peak_for_gene(rampage, peak5, peak3, gene_info, gpromoter, pregion):
