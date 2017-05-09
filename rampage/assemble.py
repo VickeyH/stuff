@@ -91,17 +91,20 @@ def convert_gtf(out_gtf):
     for iso in novel_isoform:
         iso_info = novel_isoform[iso]
         iso_exons = novel_exon[iso]
-        iso_exon_num = len(iso_exons)
         gene_id = iso.rsplit('.', 1)[0]
         gene_exon_set = annotated_exon[gene_id]
+        candidate_name = ''
+        max_overlap = 0
         for gene_name in gene_exon_set:
             gene_exons = gene_exon_set[gene_name]
             overlapped_num = len(iso_exons.intersection(gene_exons))
-            if overlapped_num >= iso_exon_num * 0.5:  # have gene_name
-                annotated_gene[gene_name].append(iso_info % gene_name)
-                break
-        else:  # no gene_name
-            annotated_gene[iso].append(iso_info % iso)
+            if overlapped_num > max_overlap:
+                candidate_name = gene_name
+                max_overlap = overlapped_num
+        if candidate_name:
+            annotated_gene[candidate_name].append(iso_info % candidate_name)
+        else:
+            annotated_gene[gene_id].append(iso_info % gene_id)
     # output GenePred
     outf = prefix + '.txt'
     with open(outf, 'w') as out:
