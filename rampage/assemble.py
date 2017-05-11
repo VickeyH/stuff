@@ -30,7 +30,7 @@ def assemble(options):
         sys.exit('Error: No StringTie installed!')
     bam = options['<bam>']
     gtf = options['--gtf']
-    thread = options('--thread')
+    thread = options['--thread']
     # run StringTie
     out_gtf = run_stringtie(bam, gtf, thread)
     convert_gtf(out_gtf)
@@ -52,6 +52,7 @@ def run_stringtie(bam, gtf, thread):
 
 
 def convert_gtf(out_gtf):
+    # TODO: add exhausted mode
     # set variables
     prefix = os.path.splitext(out_gtf)[0]
     annotated_gene = defaultdict(list)

@@ -18,7 +18,6 @@ import os.path
 from multiprocessing import Pool
 import numpy as np
 import scipy.stats
-import gffutils
 import pysam
 from seqlib.path import check_dir
 from seqlib.ngs import check_bed
@@ -37,9 +36,11 @@ def call_peak(options):
         db = options['--ref']
         ref_flag = True
     elif options['--db']:
+        import gffutils
         db = gffutils.FeatureDB(options['--db'])
         ref_flag = False
     else:
+        import gffutils
         gtf_f = options['--gtf']
         prefix = os.path.splitext(os.path.basename(gtf_f))[0]
         db = gffutils.create_db(gtf_f, prefix + '.db',
@@ -94,20 +95,19 @@ def parse_gene(db, ref_flag, pregion):
         gpromoter = []
         with open(db, 'r') as f:
             for line in f:
-                iso, chrom, strand, start, end = line.split()[:5]
+                gene_id, chrom, strand, start, end = line.split()[:5]
                 if not chrom.startswith('chr'):
                     continue
-                gene_id = iso.rsplit('.', 1)[0]
                 start = int(start) + 1
                 end = int(end)
-                if gname == gene_id or gname == '':  # not change gene
+                if gname == gene_id or gname == '':  # gene not changed
                     if gname == '':  # first entry
                         gname = gene_id
                         gstart, gend, gchr, gstrand = start, end, chrom, strand
                     else:  # not first entry
                         gstart = start if start < gstart else gstart
                         gend = end if end > gend else gend
-                else:  # change gene
+                else:  # gene changed
                     gene_info = '%s\t%s\t%d\t%d\t%s' % (gname, gchr, gstart,
                                                         gend, gstrand)
                     gpromoter = Interval(gpromoter)
@@ -115,10 +115,14 @@ def parse_gene(db, ref_flag, pregion):
                     gname = gene_id
                     gstart, gend, gchr, gstrand = start, end, chrom, strand
                     gpromoter = []
+                # define gene promoter regions
+                FPKM, TPM = line.split()[-2:]
                 if strand == '+':
-                    gpromoter.append([start - pregion, start + pregion])
+                    pinfo = '%d|%s|%s' % (start, FPKM, TPM)
+                    gpromoter.append([start - pregion, start + pregion, pinfo])
                 else:
-                    gpromoter.append([end - pregion, end + pregion])
+                    pinfo = '%d|%s|%s' % (end, FPKM, TPM)
+                    gpromoter.append([end - pregion, end + pregion, pinfo])
             else:  # last entry
                 gene_info = '%s\t%s\t%d\t%d\t%s' % (gname, gchr, gstart,
                                                     gend, gstrand)
@@ -133,10 +137,16 @@ def parse_gene(db, ref_flag, pregion):
                                                 gene.strand)
             gpromoter = []
             for t in db.children(gene.id, featuretype='transcript'):
+                FPKM = t.attributes['FPKM']
+                TPM = t.attributes['TPM']
                 if gene.strand == '+':
-                    gpromoter.append([t.start - pregion, t.start + pregion])
+                    pinfo = '%d|%s|%s' % (t.start, FPKM, TPM)
+                    gpromoter.append([t.start - pregion, t.start + pregion,
+                                      pinfo])
                 else:
-                    gpromoter.append([t.end - pregion, t.end + pregion])
+                    pinfo = '%d|%s|%s' % (t.end, FPKM, TPM)
+                    gpromoter.append([t.end - pregion, t.end + pregion,
+                                      pinfo])
             gpromoter = Interval(gpromoter)
             yield gene_info, gpromoter, gstrand
 
@@ -147,13 +157,13 @@ def call_peak_for_gene(rampage, peak5, peak3, gene_info, gpromoter, pregion):
     gene_end = int(gene_end)
     peak_loc = assign_peak(rampage, gene_chrom, gene_start, gene_end,
                            gene_strand, pregion)
-    peaks = fetch_peak(peak5, peak_loc, gene_chrom, gpromoter)
+    peaks = fetch_peak(peak5, peak_loc, gene_chrom)
     e_mean, var = cal_expression(peak3, gene_chrom, gene_start, gene_end)
     if e_mean == 0:
         return None, None
     if var == 0:
         return None, None
-    filtered_peaks = filter_peak(peaks, e_mean, var)
+    filtered_peaks = filter_peak(peaks, e_mean, var, gpromoter)
     return gene_info, filtered_peaks
 
 
@@ -182,17 +192,13 @@ def assign_peak(rampage, g_chrom, g_start, g_end, g_strand, pregion):
     return peak_loc
 
 
-def fetch_peak(peak5, peak_loc, chrom, gpromoter):
+def fetch_peak(peak5, peak_loc, chrom):
     peaks = set()
     peak5f = pysam.TabixFile(peak5)
     for loc in Interval(peak_loc):
         start, end = loc[:2]
-        if [start, end] in gpromoter:
-            pflag = 'Yes'
-        else:
-            pflag = 'No'
         for p in peak5f.fetch(chrom, start, end):
-            peaks.add(p + '\t' + pflag)
+            peaks.add(p)
     return peaks
 
 
@@ -209,13 +215,15 @@ def cal_expression(peak3, g_chrom, g_start, g_end):
     return e_mean, var
 
 
-def filter_peak(peaks, e_mean, var):
+def filter_peak(peaks, e_mean, var, gpromoter):
     filtered_peaks = []
     for p in peaks:
-        chrom, start, end, _, value, pflag = p.split()
+        chrom, start, end, _, value = p.split()
         value = float(value)
         z_score, p_value = wald_test(value, e_mean, var)
-        filtered_peaks.append(['\t'.join([chrom, start, end, pflag, str(value),
+        pos = int((int(start) + int(end)) / 2)
+        einfo = fetch_expression(gpromoter.interval, pos)
+        filtered_peaks.append(['\t'.join([chrom, start, end, einfo, str(value),
                                           str(e_mean), str(z_score),
                                           str(p_value)]),
                                p_value])
@@ -229,6 +237,35 @@ def wald_test(value, mean, var):
     z = (value - mean) / var
     p = scipy.stats.norm.sf(z)
     return z, p
+
+
+def fetch_expression(gpromoter, pos):
+    promoter_FPKM = {}
+    promoter_TPM = {}
+    promoter_list = Interval.mapto([pos, pos], gpromoter)
+    if not promoter_list:
+        return 'None'
+    else:
+        promoter_list = promoter_list[0][2:]
+    for p in promoter_list:
+        ploc, FPKM, TPM = p.split('|')
+        ploc = int(ploc)
+        if ploc in promoter_FPKM:
+            if FPKM > promoter_FPKM[ploc]:
+                promoter_FPKM[ploc] = FPKM
+                promoter_TPM[ploc] = TPM
+        else:
+            promoter_FPKM[ploc] = FPKM
+            promoter_TPM[ploc] = TPM
+    nearest_p = ''
+    nearest_d = np.inf
+    for ploc in promoter_FPKM:
+        distance = abs(pos - ploc)
+        if distance < nearest_d:
+            nearest_p = '%d|%s|%s' % (ploc, promoter_FPKM[ploc],
+                                      promoter_TPM[ploc])
+            nearest_d = distance
+    return nearest_p
 
 
 if __name__ == '__main__':
