@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 
 '''
-Usage: assemble.py [options] -g GTF <bam>
+Usage: assemble.py [options] -g GTF <bam>...
 
 Options:
     -h --help                      Show help message.
     -v --version                   Show version.
     -g GTF --gtf=GTF               Gene annotation GTF file.
     -p THREAD --thread=THREAD      Threads. [default: 5]
+    --dir=DIR                      Output directory. [default: ./]
+    --prefix=PREFIX                Prefix for merged GTF.
+                                   [default: merged_stringtie]
 '''
 
 import sys
@@ -28,30 +31,49 @@ def assemble(options):
     # parse options
     if not which('stringtie'):
         sys.exit('Error: No StringTie installed!')
-    bam = options['<bam>']
     gtf = options['--gtf']
     thread = options['--thread']
-    # run StringTie
-    out_gtf = run_stringtie(bam, gtf, thread)
-    convert_gtf(out_gtf)
+    bamf = options['<bam>']
+    dir_path = options['--dir']
+    if len(bamf) == 1:  # no replicates
+        # run StringTie
+        out_gtf = run_stringtie(bamf[0], gtf, dir_path, thread)
+        # convert GTF to GenePred
+        convert_gtf(out_gtf)
+    else:  # have replicates
+        # run StringTie
+        gtf_list = []
+        for f in bamf:
+            gtf_list.append(run_stringtie(f, gtf, dir_path, thread))
+        merged_prefix = options['--prefix']
+        out_gtf = merge_stringtie(gtf_list, gtf, dir_path, merged_prefix,
+                                  thread)
+        # convert GTF to GenePred
+        convert_gtf(out_gtf, merge=True)
 
 
-def run_stringtie(bam, gtf, thread):
+def run_stringtie(bam, gtf, dir_path, thread):
     if not os.path.isfile(bam):
         sys.exit('No BAM file: %s!' % bam)
     if not os.path.isfile(gtf):
         sys.exit('No GTF file: %s' % gtf)
-    dirname, fname = os.path.split(bam)
-    if not dirname:
-        dirname = os.getcwd()
+    fname = os.path.basename(bam)
     prefix = os.path.splitext(fname)[0]
-    outf = os.path.join(dirname, prefix + '_stringtie.gtf')
+    outf = os.path.join(dir_path, prefix + '_stringtie.gtf')
     command = 'stringtie -G %s -p %s -o %s --rf %s' % (gtf, thread, outf, bam)
     run_command(command, 'Error in StringTie!')
     return outf
 
 
-def convert_gtf(out_gtf):
+def merge_stringtie(gtf_list, gtf, dir_path, prefix, thread):
+    outf = os.path.join(dir_path, prefix + '.gtf')
+    command = 'stringtie --merge -G %s -p %s -o %s %s' % (gtf, thread, outf,
+                                                          '\t'.join(gtf_list))
+    run_command(command, 'Error in StringTie --merge!')
+    return outf
+
+
+def convert_gtf(out_gtf, merge=False):
     # TODO: add exhausted mode
     # set variables
     prefix = os.path.splitext(out_gtf)[0]
@@ -59,6 +81,10 @@ def convert_gtf(out_gtf):
     novel_isoform = {}
     annotated_exon = defaultdict(dict)
     novel_exon = defaultdict(set)
+    if merge:
+        gene_symbol = 'gene_name'
+    else:
+        gene_symbol = 'ref_gene_name'
     # parse GTF
     with open(out_gtf, 'r') as f:
         for line in f:
@@ -69,18 +95,18 @@ def convert_gtf(out_gtf):
                                                     info.split(';')[:-1])}
             if etype == 'transcript':  # transcript
                 out_info = '\t'.join(['%s', chrom, strand, start, end, start,
-                                      start, '1', start + ',', end + ',',
-                                      info['FPKM'], info['TPM']]) + '\n'
-                if 'ref_gene_name' in info:
-                    gene_name = info['ref_gene_name']
+                                      start, '1', start + ',', end + ','])
+                out_info += '\n'
+                if gene_symbol in info:
+                    gene_name = info[gene_symbol]
                     annotated_gene[gene_name].append(out_info % gene_name)
                 else:
                     iso_id = info['transcript_id']
                     novel_isoform[iso_id] = out_info
             else:  # exon
-                if 'ref_gene_name' in info:
+                if gene_symbol in info:
                     gene_id = info['gene_id']
-                    gene_name = info['ref_gene_name']
+                    gene_name = info[gene_symbol]
                     if gene_name not in annotated_exon[gene_id]:
                         annotated_exon[gene_id][gene_name] = set([start, end])
                     else:

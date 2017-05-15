@@ -8,7 +8,7 @@ Options:
     --version                      Show version.
     -p THREAD --thread=THREAD      Threads. [default: 5]
     -o OUTPUT --output=OUTPUT      Output directory. [default: rampage_peak]
-    --min=MIN                      Minimum read counts. [default: 3]
+    --min=MIN                      Minimum read counts. [default: 1]
 '''
 
 import os
