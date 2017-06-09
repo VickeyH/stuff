@@ -132,13 +132,8 @@ def fetch_read1(bam, chrom):
         name = read.query_name
         start = str(read.reference_start)
         end = str(read.reference_end)
-        if strand == '+':
-            barcode = dna_to_rna(read.query_sequence[:6])
-        else:
-            barcode = dna_to_rna(read.query_sequence[-6:],
-                                 strand=strand)
         read_id = '\t'.join([name, mate_chrom, mate_pos, mate_strand])
-        read1_lst[read_id] = [name, chrom, start, end, strand, barcode]
+        read1_lst[read_id] = [name, chrom, start, end, strand]
     return read1_lst
 
 
@@ -160,10 +155,8 @@ def fetch_read2(bam, read1, chrom):
         else:
             barcode = dna_to_rna(read.query_sequence[-15:],
                                  strand=strand)
-        read1_barcode = read1[read_id][5]
-        collapsed_pairs.add('\t'.join(read1[read_id][1:5] + [chrom, start, end,
-                                                             read1_barcode +
-                                                             barcode]))
+        collapsed_pairs.add('\t'.join(read1[read_id] + [chrom, start, end,
+                                                        barcode]))
     return collapsed_pairs
 
 
