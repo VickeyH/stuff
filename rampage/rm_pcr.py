@@ -31,13 +31,14 @@ def rm_pcr(options):
     thread = int(options['--thread'])
     folder = create_dir(options['--output'])
     min_read = int(options['--min'])
+    total_counts = 0
     # remove PCR duplicates
     if thread > 1:  # more than 1 thread, parse bam file based on chromosome
         from multiprocessing import Pool
         p = Pool(thread)
         result = []
-        for chrom in check_bam(rampage).references:
-            if chrom.startswith('chr'):
+        for chrom in check_bam(rampage).references:  # for each chromosome
+            if chrom.startswith('chr'):  # only parse normal chromosome
                 result.append(p.apply_async(remove_pcr, args=(rampage,
                                                               chrom,)))
         p.close()
@@ -48,10 +49,12 @@ def rm_pcr(options):
             else:
                 init = False
             collapsed_pairs = r.get()
-            write_signal(collapsed_pairs, folder, min_read, init)
+            total_counts += write_signal(collapsed_pairs, folder, min_read,
+                                         init)
     else:
         collapsed_pairs = remove_pcr(rampage)
-        write_signal(collapsed_pairs, folder, min_read, True)
+        total_counts += write_signal(collapsed_pairs, folder, min_read, True)
+    print('Total counts: %d' % total_counts)
 
 
 def check_file(fname, init):
@@ -70,10 +73,12 @@ def write_signal(pairs, folder, min_read, init):
     for pair in pairs:
         info = pair.rsplit('\t', 1)[0]
         uniq_pairs[info] += 1
+    total_counts = 0
     for pair in uniq_pairs:
         read_count = uniq_pairs[pair]
-        if read_count < min_read:
+        if read_count < min_read:  # not enough reads
             continue
+        total_counts += read_count
         pair_info = pair.split()
         r1_chrom, r1_start, r1_end, strand = pair_info[:4]
         r2_chrom, r2_start, r2_end = pair_info[4:]
@@ -103,22 +108,24 @@ def write_signal(pairs, folder, min_read, init):
             bed.write('\t'.join([r1_chrom, r2_start, r1_end, 'link\t0',
                                  strand, r2_start, r2_start, '0,0,0',
                                  '2', '1,1', offset]) + '\n')
+    return total_counts
 
 
 def remove_pcr(bam_f, chrom=None):
     bam = check_bam(bam_f)
-    read1 = fetch_read1(bam, chrom)
-    return fetch_read2(bam, read1, chrom)
+    read1 = fetch_read1(bam, chrom)  # fetch read1
+    return fetch_read2(bam, read1, chrom)  # fetch read2
 
 
 def fetch_read1(bam, chrom):
     read1_lst = {}
     for read in bam.fetch(chrom):
+        # not read2 or secondary alignment or read2 unmapped
         if read.is_read2 or read.is_secondary or read.mate_is_unmapped:
             continue
         chrom = read.reference_name
         mate_chrom = read.next_reference_name
-        if chrom != mate_chrom:
+        if chrom != mate_chrom:  # not same chromosome
             continue
         if not read.is_reverse and read.mate_is_reverse:
             strand = '+'
@@ -139,6 +146,7 @@ def fetch_read1(bam, chrom):
 
 def fetch_read2(bam, read1, chrom):
     collapsed_pairs = set()
+    # not read1 or secondary alignment or read1 unmapped
     for read in bam.fetch(chrom):
         if read.is_read1 or read.is_secondary or read.mate_is_unmapped:
             continue
@@ -155,8 +163,8 @@ def fetch_read2(bam, read1, chrom):
         else:
             barcode = dna_to_rna(read.query_sequence[-15:],
                                  strand=strand)
-        collapsed_pairs.add('\t'.join(read1[read_id] + [chrom, start, end,
-                                                        barcode]))
+        collapsed_pairs.add('\t'.join(read1[read_id][1:] + [chrom, start, end,
+                                                            barcode]))
     return collapsed_pairs
 
 
