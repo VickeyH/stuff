@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 '''
-Usage: fseq.py [options] <rampagepeak>
+Usage: fseq.py [options] <rampagedir>
 
 Options:
     -h --help                      Show help message.
@@ -10,7 +10,6 @@ Options:
     --wig                          Create Wig files.
     -p PERCENT                     Retained percent of reads in resized peaks.
                                    [default: 0.95]
-    --total=TOTAL                  Used to calculate RPM.
 '''
 
 import sys
@@ -34,14 +33,12 @@ def fseq(options):
     # parse options
     if not which('fseq'):
         sys.exit('Error: No F-seq installed!')
-    folder = check_dir(options['<rampagepeak>'])
+    folder = check_dir(options['<rampagedir>'])
     flength = options['-l']
     wig_flag = options['--wig']
     percent = float(options['-p'])
-    if options['--total'] is None:
-        total = 0
-    else:
-        total = int(options['--total'])
+    with open(os.path.join(folder, 'total_counts.txt'), 'r') as f:
+        total = int(f.read().rstrip())
     # run F-seq
     flist = {'+': 'rampage_plus_5end.bed', '-': 'rampage_minus_5end.bed'}
     all_peak_f = os.path.join(folder, 'rampage_peaks.txt')
@@ -109,6 +106,8 @@ def resize_peak(peak, bed, resized_peak, strand, percent):
             for read in bed_f.fetch(chrom, start, end):
                 sites.append(int(read.split()[1]))
                 total += 1
+            if total == 0:
+                continue
             # fetch peak tag
             sites = Counter(sites)
             loc, height = sites.most_common()[0]

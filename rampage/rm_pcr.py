@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 '''
-Usage: rm_pcr.py [options] <rampage>
+Usage: rm_pcr.py [options] <rampage>...
 
 Options:
     -h --help                      Show help message.
@@ -27,48 +27,38 @@ def rm_pcr(options):
     Remove PCR duplicates
     '''
     # parse options
-    rampage = options['<rampage>']
+    rampage_lst = options['<rampage>']
     thread = int(options['--thread'])
     folder = create_dir(options['--output'])
     min_read = int(options['--min'])
-    total_counts = 0
     # remove PCR duplicates
-    if thread > 1:  # more than 1 thread, parse bam file based on chromosome
+    if thread > 1:
         from multiprocessing import Pool
         p = Pool(thread)
         result = []
-        for chrom in check_bam(rampage).references:  # for each chromosome
-            if chrom.startswith('chr'):  # only parse normal chromosome
-                result.append(p.apply_async(remove_pcr, args=(rampage,
-                                                              chrom,)))
+        for rampage in rampage_lst:  # for each rampage replicate
+            for chrom in check_bam(rampage).references:  # for each chromosome
+                if chrom.startswith('chr'):  # only parse normal chromosome
+                    result.append(p.apply_async(remove_pcr, args=(rampage,
+                                                                  chrom,)))
         p.close()
         p.join()
-        for n, r in enumerate(result):
-            if n == 0:
-                init = True
-            else:
-                init = False
-            collapsed_pairs = r.get()
-            total_counts += write_signal(collapsed_pairs, folder, min_read,
-                                         init)
+        collapsed_pairs = []
+        for r in result:
+            collapsed_pairs.extend(r.get())
     else:
-        collapsed_pairs = remove_pcr(rampage)
-        total_counts += write_signal(collapsed_pairs, folder, min_read, True)
-    print('Total counts: %d' % total_counts)
+        collapsed_pairs = remove_pcr(rampage_lst)
+    total_counts = write_signal(collapsed_pairs, folder, min_read)
+    with open(os.path.join(folder, 'total_counts.txt'), 'w') as out:
+        out.write('%d\n' % total_counts)
 
 
-def check_file(fname, init):
-    if os.path.isfile(fname) and init:
-        os.remove(fname)
-    return open(fname, 'a')
-
-
-def write_signal(pairs, folder, min_read, init):
-    bed5p = check_file(folder + '/rampage_plus_5end.bed', init)
-    bed5m = check_file(folder + '/rampage_minus_5end.bed', init)
-    bed3p = check_file(folder + '/rampage_plus_3read.bed', init)
-    bed3m = check_file(folder + '/rampage_minus_3read.bed', init)
-    bed = check_file(folder + '/rampage_link.bed', init)
+def write_signal(pairs, folder, min_read):
+    bed5p = open(os.path.join(folder, 'rampage_plus_5end.bed'), 'w')
+    bed5m = open(os.path.join(folder, 'rampage_minus_5end.bed'), 'w')
+    bed3p = open(os.path.join(folder, 'rampage_plus_3read.bed'), 'w')
+    bed3m = open(os.path.join(folder, 'rampage_minus_3read.bed'), 'w')
+    bed = open(os.path.join(folder, 'rampage_link.bed'), 'w')
     uniq_pairs = defaultdict(int)
     for pair in pairs:
         info = pair.rsplit('\t', 1)[0]
@@ -112,9 +102,18 @@ def write_signal(pairs, folder, min_read, init):
 
 
 def remove_pcr(bam_f, chrom=None):
-    bam = check_bam(bam_f)
-    read1 = fetch_read1(bam, chrom)  # fetch read1
-    return fetch_read2(bam, read1, chrom)  # fetch read2
+    if type(bam_f) is list:
+        collapsed_pairs = []
+        for f in bam_f:
+            bam = check_bam(f)
+            read1 = fetch_read1(bam, chrom)  # fetch read1
+            # fetch read2
+            collapsed_pairs.extend(fetch_read2(bam, read1, chrom))
+    else:
+        bam = check_bam(bam_f)
+        read1 = fetch_read1(bam, chrom)  # fetch read1
+        collapsed_pairs = fetch_read2(bam, read1, chrom)  # fetch read2
+    return collapsed_pairs
 
 
 def fetch_read1(bam, chrom):
@@ -163,6 +162,7 @@ def fetch_read2(bam, read1, chrom):
         else:
             barcode = dna_to_rna(read.query_sequence[-15:],
                                  strand=strand)
+        # remove PCR duplicates
         collapsed_pairs.add('\t'.join(read1[read_id][1:] + [chrom, start, end,
                                                             barcode]))
     return collapsed_pairs
