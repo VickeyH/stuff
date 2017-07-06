@@ -80,7 +80,7 @@ def parse_gene(db, ref_flag, prom):
                 gene_id, chrom, strand, start, end = line.split()[:5]
                 if not chrom.startswith('chr'):
                     continue
-                start = int(start) + 1
+                start = int(start) - 1
                 end = int(end)
                 if gname == '':  # first entry
                     gname = gene_id
@@ -119,7 +119,7 @@ def parse_gene(db, ref_flag, prom):
             if not gene.seqid.startswith('chr'):
                 continue
             gene_info = '%s\t%s\t%d\t%d\t%s' % (gene.id, gene.seqid,
-                                                gene.start, gene.end,
+                                                gene.start - 1 gene.end,
                                                 gene.strand)
             gpromoter = []  # tss regions
             for t in db.children(gene.id, featuretype='transcript'):
