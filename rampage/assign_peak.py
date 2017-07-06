@@ -105,7 +105,6 @@ def parse_gene(db, ref_flag, prom):
                 if strand == '+':
                     gpromoter.append([start - prom, start + prom, start])
                 else:
-                    pinfo = str(end)
                     gpromoter.append([end - prom, end + prom, end])
             else:  # last entry
                 gpromoter = Interval(gpromoter)  # combine tss regions
