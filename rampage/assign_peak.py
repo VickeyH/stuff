@@ -125,13 +125,11 @@ def parse_gene(db, ref_flag, prom):
             gpromoter = []  # tss regions
             for t in db.children(gene.id, featuretype='transcript'):
                 if gene.strand == '+':
-                    pinfo = str(t.start)
                     gpromoter.append([t.start - prom, t.start + prom,
-                                      pinfo])
+                                      t.start])
                 else:
-                    pinfo = str(t.end)
                     gpromoter.append([t.end - prom, t.end + prom,
-                                      pinfo])
+                                      t.end])
             gpromoter = Interval(gpromoter)  # combine tss regions
             yield gene_info, gpromoter
 
