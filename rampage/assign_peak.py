@@ -197,7 +197,6 @@ def fetch_tss(gpromoter, pos):
     nearest_p = ''
     nearest_d = np.inf
     for ploc in promoter_list:
-        ploc = ploc
         distance = abs(pos - ploc)
         if distance < nearest_d:
             nearest_p = ploc
