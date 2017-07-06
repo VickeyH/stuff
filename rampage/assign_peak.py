@@ -72,7 +72,8 @@ def assign_peak(options):
 def parse_gene(db, ref_flag, prom):
     if ref_flag:  # for GenePred
         gname = ''
-        gstart, gend, gchr, gstrand = 0, 0, '', ''
+        gchr, gstrand = '', ''
+        ginterval = []  # genomic regions
         gpromoter = []  # tss regions
         with open(db, 'r') as f:
             for line in f:
@@ -81,34 +82,39 @@ def parse_gene(db, ref_flag, prom):
                     continue
                 start = int(start) + 1
                 end = int(end)
-                if gname == gene_id or gname == '':  # gene not changed
-                    if gname == '':  # first entry
-                        gname = gene_id
-                        gstart, gend, gchr, gstrand = start, end, chrom, strand
-                    else:  # not first entry
-                        gstart = start if start < gstart else gstart
-                        gend = end if end > gend else gend
-                else:  # gene changed
-                    gene_info = '%s\t%s\t%d\t%d\t%s' % (gname, gchr, gstart,
-                                                        gend, gstrand)
+                if gname == '':  # first entry
+                    gname = gene_id
+                    gchr, gstrand = chrom, strand
+                # not same gene
+                elif gname != gene_id or chrom != gchr or strand != gstrand:
                     gpromoter = Interval(gpromoter)  # combine tss regions
-                    yield gene_info, gpromoter
+                    for itl in Interval(ginterval).interval:
+                        gstart, gend = itl
+                        gene_info = '%s\t%s\t%d\t%d\t%s' % (gname, gchr,
+                                                            gstart, gend,
+                                                            gstrand)
+                        yield gene_info, gpromoter
                     # update gene info
                     gname = gene_id
-                    gstart, gend, gchr, gstrand = start, end, chrom, strand
+                    gchr, gstrand = chrom, strand
+                    ginterval = []
                     gpromoter = []
+                # add genomic interval
+                ginterval.append([start, end])
                 # define gene promoter regions
                 if strand == '+':
-                    pinfo = str(start)
-                    gpromoter.append([start - prom, start + prom, pinfo])
+                    gpromoter.append([start - prom, start + prom, start])
                 else:
                     pinfo = str(end)
-                    gpromoter.append([end - prom, end + prom, pinfo])
+                    gpromoter.append([end - prom, end + prom, end])
             else:  # last entry
-                gene_info = '%s\t%s\t%d\t%d\t%s' % (gname, gchr, gstart,
-                                                    gend, gstrand)
                 gpromoter = Interval(gpromoter)  # combine tss regions
-                yield gene_info, gpromoter
+                for itl in Interval(ginterval).interval:
+                    gstart, gend = itl
+                    gene_info = '%s\t%s\t%d\t%d\t%s' % (gname, gchr,
+                                                        gstart, gend,
+                                                        gstrand)
+                    yield gene_info, gpromoter
     else:  # for GTF
         for gene in db.features_of_type('gene'):
             if not gene.seqid.startswith('chr'):
@@ -194,7 +200,7 @@ def fetch_tss(gpromoter, pos):
     nearest_p = ''
     nearest_d = np.inf
     for ploc in promoter_list:
-        ploc = int(ploc)
+        ploc = ploc
         distance = abs(pos - ploc)
         if distance < nearest_d:
             nearest_p = ploc
