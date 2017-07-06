@@ -48,15 +48,15 @@ def assign_peak(options):
     folder = check_dir(options['<rampagepeak>'])
     rampage = check_bed(os.path.join(folder, 'rampage_link.bed'),
                         return_handle=False)
-    peak = check_bed(os.path.join(folder, 'rampage_peaks.txt'),
-                     return_handle=False)
+    rampage_peak = check_bed(os.path.join(folder, 'rampage_peaks.txt'),
+                             return_handle=False)
     prom = int(options['--promoter'])
     # align and filter candidate peak
     p = Pool(int(options['--thread']))
     results = []
     for gene_info, gpromoter in parse_gene(db, ref_flag, prom):
         results.append(p.apply_async(assign_peak_to_gene,
-                                     args=(rampage, peak, gene_info,
+                                     args=(rampage, rampage_peak, gene_info,
                                            gpromoter, prom)))
     p.close()
     p.join()
