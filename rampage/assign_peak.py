@@ -119,7 +119,7 @@ def parse_gene(db, ref_flag, prom):
             if not gene.seqid.startswith('chr'):
                 continue
             gene_info = '%s\t%s\t%d\t%d\t%s' % (gene.id, gene.seqid,
-                                                gene.start - 1 gene.end,
+                                                gene.start - 1, gene.end,
                                                 gene.strand)
             gpromoter = []  # tss regions
             for t in db.children(gene.id, featuretype='transcript'):
