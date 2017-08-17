@@ -61,7 +61,7 @@ def write_signal(pairs, folder, min_read):
     bed = open(os.path.join(folder, 'rampage_link.bed'), 'w')
     uniq_pairs = defaultdict(int)
     for pair in pairs:
-        info = pair.rsplit('\t', 1)[0]
+        info = pair.rsplit('\t', 1)[0]  # remove barcode info
         uniq_pairs[info] += 1
     total_counts = 0
     for pair in uniq_pairs:
@@ -70,8 +70,8 @@ def write_signal(pairs, folder, min_read):
             continue
         total_counts += read_count
         pair_info = pair.split()
-        r1_chrom, r1_start, r1_end, strand = pair_info[:4]
-        r2_chrom, r2_start, r2_end = pair_info[4:]
+        r1_chrom, r1_start, r1_end, strand = pair_info[:4]  # read1
+        r2_chrom, r2_start, r2_end = pair_info[4:]  # read2
         if strand == '+':
             start = int(r1_start)
             end = int(r2_end)
@@ -82,9 +82,9 @@ def write_signal(pairs, folder, min_read):
                                                         end, strand) *
                         read_count)
             offset = '0,' + str(end - start - 1)
-            bed.write('\t'.join([r1_chrom, r1_start, r2_end, 'link\t0',
-                                 strand, r1_start, r1_start, '0,0,0',
-                                 '2', '1,1', offset]) + '\n')
+            bed.write('\t'.join([r1_chrom, r1_start, r2_end, 'link',
+                                 str(read_count), strand, r1_start, r1_start,
+                                 '0,0,0', '2', '1,1', offset]) + '\n')
         else:
             start = int(r2_start)
             end = int(r1_end)
@@ -95,32 +95,36 @@ def write_signal(pairs, folder, min_read):
                                                         start - 1, strand) *
                         read_count)
             offset = '0,' + str(end - start - 1)
-            bed.write('\t'.join([r1_chrom, r2_start, r1_end, 'link\t0',
-                                 strand, r2_start, r2_start, '0,0,0',
-                                 '2', '1,1', offset]) + '\n')
+            bed.write('\t'.join([r1_chrom, r2_start, r1_end, 'link',
+                                 str(read_count), strand, r2_start, r2_start,
+                                 '0,0,0', '2', '1,1', offset]) + '\n')
     return total_counts
 
 
 def remove_pcr(bam_f, chrom=None):
-    if type(bam_f) is list:
+    if type(bam_f) is list:  # multiple bam files
         collapsed_pairs = []
         for f in bam_f:
             bam = check_bam(f)
-            read1 = fetch_read1(bam, chrom)  # fetch read1
-            # fetch read2
-            collapsed_pairs.extend(fetch_read2(bam, read1, chrom))
-    else:
+            read2 = fetch_read2(bam, chrom)  # fetch read2
+            # fetch read1
+            collapsed_pairs.extend(fetch_read1(bam, read2, chrom))
+    else:  # single bam file
         bam = check_bam(bam_f)
-        read1 = fetch_read1(bam, chrom)  # fetch read1
-        collapsed_pairs = fetch_read2(bam, read1, chrom)  # fetch read2
+        read2 = fetch_read2(bam, chrom)  # fetch read2
+        collapsed_pairs = fetch_read1(bam, read2, chrom)  # fetch read1
     return collapsed_pairs
 
 
-def fetch_read1(bam, chrom):
-    read1_lst = {}
+def fetch_read2(bam, chrom):
+    read2_lst = {}
     for read in bam.fetch(chrom):
-        # not read2 or secondary alignment or read2 unmapped
-        if read.is_read2 or read.is_secondary or read.mate_is_unmapped:
+        # not read1 or secondary alignment or read1 unmapped
+        if read.is_read1 or read.is_secondary or read.mate_is_unmapped:
+            continue
+        if not read.is_proper_pair:  # not proper pair
+            continue
+        if read.get_tag('NH') != 1:  # not unique read
             continue
         chrom = read.reference_name
         mate_chrom = read.next_reference_name
@@ -138,33 +142,36 @@ def fetch_read1(bam, chrom):
         name = read.query_name
         start = str(read.reference_start)
         end = str(read.reference_end)
-        read_id = '\t'.join([name, mate_chrom, mate_pos, mate_strand])
-        read1_lst[read_id] = [name, chrom, start, end, strand]
-    return read1_lst
-
-
-def fetch_read2(bam, read1, chrom):
-    collapsed_pairs = set()
-    # not read1 or secondary alignment or read1 unmapped
-    for read in bam.fetch(chrom):
-        if read.is_read1 or read.is_secondary or read.mate_is_unmapped:
-            continue
-        name = read.query_name
-        chrom = read.reference_name
-        start = str(read.reference_start)
-        strand = '+' if not read.is_reverse else '-'
-        read_id = '\t'.join([name, chrom, start, strand])
-        if read_id not in read1:
-            continue
-        end = str(read.reference_end)
         if strand == '+':
             barcode = dna_to_rna(read.query_sequence[:15])
         else:
             barcode = dna_to_rna(read.query_sequence[-15:],
                                  strand=strand)
+        read_id = '\t'.join([name, mate_chrom, mate_pos, mate_strand])
+        read2_lst[read_id] = [chrom, start, end, barcode]
+    return read2_lst
+
+
+def fetch_read1(bam, read2, chrom):
+    collapsed_pairs = set()
+    for read in bam.fetch(chrom):
+        # not read2 or read2 unmapped
+        if read.is_read2 or read.mate_is_unmapped:
+            continue
+        if not read.is_proper_pair:  # not proper pair
+            continue
+        name = read.query_name
+        chrom = read.reference_name
+        start = str(read.reference_start)
+        # parse strand info
+        strand = '+' if not read.is_reverse else '-'
+        read_id = '\t'.join([name, chrom, start, strand])
+        if read_id not in read2:
+            continue
+        end = str(read.reference_end)
         # remove PCR duplicates
-        collapsed_pairs.add('\t'.join(read1[read_id][1:] + [chrom, start, end,
-                                                            barcode]))
+        collapsed_pairs.add('\t'.join([chrom, start, end, strand] +
+                                      read2[read_id]))
     return collapsed_pairs
 
 
