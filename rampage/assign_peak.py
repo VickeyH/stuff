@@ -118,9 +118,9 @@ def parse_gene(db, ref_flag, prom):
         for gene in db.features_of_type('gene'):
             if not gene.seqid.startswith('chr'):
                 continue
-            gene_info = '%s\t%s\t%d\t%d\t%s' % (gene.id, gene.seqid,
-                                                gene.start - 1, gene.end,
-                                                gene.strand)
+            gene_info = '%s\t%s\t%d\t%d\t%s' % (gene['gene_name'][0],
+                                                gene.seqid, gene.start - 1,
+                                                gene.end, gene.strand)
             gpromoter = []  # tss regions
             for t in db.children(gene.id, featuretype='transcript'):
                 if gene.strand == '+':
