@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 '''
-Usage: fseq.py [options] <rampagedir>
+Usage: call_peak.py [options] <rampagedir>
 
 Options:
     -h --help                      Show help message.

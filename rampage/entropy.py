@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 '''
-Usage: rm_pcr.py [options] <rampagedir>
+Usage: entropy.py [options] <rampagedir>
 
 Options:
     -h --help                      Show help message.

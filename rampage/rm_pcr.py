@@ -119,8 +119,8 @@ def remove_pcr(bam_f, chrom=None):
 def fetch_read2(bam, chrom):
     read2_lst = {}
     for read in bam.fetch(chrom):
-        # not read1 or secondary alignment or read1 unmapped
-        if read.is_read1 or read.is_secondary or read.mate_is_unmapped:
+        # not read1 or secondary alignment
+        if read.is_read1 or read.is_secondary:
             continue
         if not read.is_proper_pair:  # not proper pair
             continue
@@ -155,8 +155,8 @@ def fetch_read2(bam, chrom):
 def fetch_read1(bam, read2, chrom):
     collapsed_pairs = set()
     for read in bam.fetch(chrom):
-        # not read2 or read2 unmapped
-        if read.is_read2 or read.mate_is_unmapped:
+        # not read2
+        if read.is_read2:
             continue
         if not read.is_proper_pair:  # not proper pair
             continue
