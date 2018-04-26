@@ -49,7 +49,7 @@ def fseq(options):
             with open(peak_f, 'r') as f:
                 for line in f:
                     if total:  # calculate RPM
-                        reads = int(line.rstrip().split()[7])
+                        reads = int(line.rstrip().split()[9])
                         rpm = reads * 1000000.0 / total
                         out.write(line.rstrip() + '\t%f\n' % rpm)
                     else:
